@@ -5,10 +5,15 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <memory>
 
 // pthread.h is included for tracking bad forks
 #ifndef WIN32
 #include <pthread.h>
+#endif
+
+#ifdef USE_MPS
+#include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
 
 namespace torch::mps {
@@ -277,5 +282,20 @@ static struct PyMethodDef _MPSModule_methods[] = {
 PyMethodDef* python_functions() {
   return _MPSModule_methods;
 }
+
+#ifdef USE_MPS
+void initModule(PyObject* module) {
+  using namespace at::native::mps;
+  auto m = py::handle(module).cast<py::module>();
+  py::class_<
+      DynamicMetalShaderLibrary,
+      std::shared_ptr<DynamicMetalShaderLibrary>>(m, "_mps_ShaderLibrary")
+      .def_property_readonly(
+          "function_names", &DynamicMetalShaderLibrary::getFunctionNames);
+  m.def("_mps_compileShader", [](const std::string& source) {
+    return std::make_shared<DynamicMetalShaderLibrary>(source);
+  });
+}
+#endif /* USE_MPS */
 
 } // namespace torch::mps

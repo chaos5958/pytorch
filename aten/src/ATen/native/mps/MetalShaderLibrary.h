@@ -71,4 +71,12 @@ class MetalShaderLibrary {
       cplMap;
 };
 
+class DynamicMetalShaderLibrary : public MetalShaderLibrary {
+ public:
+  DynamicMetalShaderLibrary(const std::string& src) : MetalShaderLibrary(src) {
+    // Compile right away
+    getLibrary();
+  }
+};
+
 } // namespace at::native::mps
