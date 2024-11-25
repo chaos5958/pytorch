@@ -23,10 +23,10 @@ from typing import (
 )
 
 import sympy
-from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from sympy.printing.printer import Printer
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
@@ -2010,12 +2010,13 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
                     dtype_handler = DtypePropagationOpsHandler()
 
+                    output_idx = 0
+
                     def do_cse(v):
                         # TODO - throw on default
                         output_dtype = getattr(
                             dtype_handler,
                             name,
-                            dtype_handler.default_handler,
                         )(*args)
 
                         csevar = V.kernel.cse.generate(
@@ -2024,7 +2025,25 @@ class Kernel(CodeGen):
                             bounds=bounds,
                             dtype=output_dtype,
                         )
+
+                        nonlocal output_idx
+                        if config.test_configs.runtime_triton_dtype_assert and not (
+                            V.graph.get_current_device_or_throw().type == "cpu"
+                            and config.cpu_backend != "triton"
+                        ):
+                            from torch._inductor.codegen.triton import triton_type
+
+                            # we tree_map over the output, so we need to fetch corresponding dtype
+                            if isinstance(output_dtype, (list, tuple)):
+                                output_dtype = output_dtype[output_idx]
+
+                            V.kernel.compute.writeline(
+                                f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
+                            )
+                        output_idx += 1
+
                         csevar.update_on_args(name, args, kwargs)
+
                         return csevar
 
                     return pytree.tree_map(do_cse, value)
