@@ -996,9 +996,15 @@ def unsqueeze_default(func, *args, **kwargs):
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
     new_kwargs["dim"] = _wrap_jagged_dim(
-        len(inp._size) + 1, dim, inp._ragged_idx, "unsqueeze"
+        len(inp._size) + 1, dim, inp._ragged_idx, "unsqueeze", allow_ragged_dim=True
     )
-    return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
+
+    # ragged_idx changes if a dimension is added before it
+    output_kwargs = extract_kwargs(inp)
+    if new_kwargs["dim"] <= inp._ragged_idx - 1:
+        output_kwargs["_ragged_idx"] += 1
+
+    return NestedTensor(func(values, **new_kwargs), **output_kwargs)
 
 
 @register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any")
@@ -1346,10 +1352,23 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
         # reduction cases: (non-batch), (non-batch, non-batch), etc.
         # apply sum directly on values
         out = func(inp._values, **new_kwargs)
+        out_kwargs = extract_kwargs(inp)
+        if not new_kwargs.get("keepdim", False):
+            # dims are reduced away -> ragged_idx of output needs to be reevaluated
+            dimlist = (
+                new_kwargs["dim"]
+                if isinstance(new_kwargs["dim"], (tuple, list))
+                else [new_kwargs["dim"]]
+            )
+            for d in dimlist:
+                # adjust for all dims reduced before the ragged dim
+                if d < inp._ragged_idx - 1:
+                    out_kwargs["_ragged_idx"] -= 1
+
         if isinstance(out, (tuple, list)):
             # some ops return multiple things; wrap each of them as an NJT
-            return type(out)(NestedTensor(o, **extract_kwargs(inp)) for o in out)
-        return NestedTensor(out, **extract_kwargs(inp))
+            return type(out)(NestedTensor(o, **out_kwargs) for o in out)
+        return NestedTensor(out, **out_kwargs)
 
 
 @register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")
@@ -1644,7 +1663,12 @@ def select_int(func, *args, **kwargs):
             "select(): not yet supported on dim != 0 for non-contiguous nested tensor with holes"
         )
 
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+    # if selecting before the ragged dim, adjust output ragged_idx
+    out_kwargs = extract_kwargs(inp)
+    if new_kwargs["dim"] < inp._ragged_idx - 1:
+        out_kwargs["_ragged_idx"] -= 1
+
+    return NestedTensor(func(inp._values, **new_kwargs), **out_kwargs)
 
 
 @register_jagged_func(

@@ -7954,31 +7954,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="no_linear_noncontig_holes_support",
     ),
-    # Some kinda reduction bug that needs to be fixed!
-    XFailRule(
-        error_type=IndexError,
-        error_msg="tuple index out of range",
-        op_match_fn=lambda device, op: (
-            # min.reduction_with_dim and max.reduction_with_dim aren't associated with
-            # ReductionOpInfo entries sadly even though they're reductions
-            isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name
-        ),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_transposed" in sample.name
-            and "normal dim reduction with keepdim=False" in sample.name
-        ),
-        name="transposed_reduction_bug",
-    ),
-    # likely related to previous: similar error when operating on select() with dim=0
-    XFailRule(
-        error_type=IndexError,
-        error_msg="tuple index out of range",
-        op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_transposed" in sample.name and "normal_dim" in sample.name
-        ),
-        name="select_batch_dim_bug",
-    ),
     # nanmean sometimes hits an unimplemented nansum() path and other times hits an
     # unimplemented sum() path
     XFailRule(
@@ -8081,27 +8056,10 @@ FORWARD_SKIPS_AND_XFAILS = [
                 "narrow",
                 "select",
                 "split",
-                "unsqueeze",
             }
         ),
         sample_match_fn=lambda device, sample: "ragged_dim" in sample.name,
         name="ragged_dim_unsupported",
-    ),
-    # Bug: unsqueeze at the end is wrong
-    XFailRule(
-        error_type=AssertionError,
-        error_msg="The values for attribute 'shape' do not match",
-        op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
-        sample_match_fn=lambda device, sample: "add dim to the end" in sample.name,
-        name="unsqueeze_end_dim_unsupported",
-    ),
-    # Bug: inserting a dim before the ragged dim should update ragged_idx!
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
-        sample_match_fn=lambda device, sample: (
-            sample.kwargs["dim"] <= sample.input._ragged_idx
-        ),
-        name="unsqueeze_dim_before_ragged_bug",
     ),
     XFailRule(
         error_type=RuntimeError,
@@ -8280,8 +8238,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
 ]
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
-    # The unsqueeze bugs don't affect eager vs. compile consistency so they don't fail here
-    *(x for x in FORWARD_SKIPS_AND_XFAILS if not x.name.startswith("unsqueeze")),
+    *FORWARD_SKIPS_AND_XFAILS,
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8403,8 +8360,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         name="clone_unbind_data_dependency_backward",
     ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
-    # The unsqueeze bugs don't affect eager vs. compile consistency so they don't fail here
-    *(x for x in BACKWARD_SKIPS_AND_XFAILS if not x.name.startswith("unsqueeze")),
+    *BACKWARD_SKIPS_AND_XFAILS,
 ]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
