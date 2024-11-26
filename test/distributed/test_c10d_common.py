@@ -321,10 +321,11 @@ class CommonDistributedDataParallelTest:
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
         # Use this hack to remove files for that test
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
+        if hasattr(self, "file_name"):
+            try:
+                os.remove(self.file_name)
+            except OSError:
+                pass
 
     @property
     def world_size(self):
